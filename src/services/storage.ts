@@ -77,6 +77,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   enable3DCardPreview: true,
   ambientParticlesEnabled: false,
   ambientParticleStyle: 'sakura',
+  appIntroAnimationEnabled: true,
 };
 
 // =============================================================

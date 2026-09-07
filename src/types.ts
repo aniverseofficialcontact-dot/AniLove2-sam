@@ -405,6 +405,7 @@ export interface UserSettings {
   enable3DCardPreview?: boolean;
   ambientParticlesEnabled?: boolean;
   ambientParticleStyle?: 'sakura' | 'snow' | 'fireflies' | 'none';
+  appIntroAnimationEnabled?: boolean;
 }
 
 export type ThumbnailAppearance = 'snapshot' | 'banner' | 'poster';
