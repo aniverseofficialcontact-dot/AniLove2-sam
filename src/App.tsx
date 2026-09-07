@@ -54,6 +54,7 @@ import { CardInventoryView } from './components/CardInventoryView';
 import { PinUnlockModal } from './components/PinUnlockModal';
 import { QuoteOfTheDay } from './components/QuoteOfTheDay';
 import { AniListSyncBar } from './components/AniListSyncBar';
+import { AppIntroSplash } from './components/AppIntroSplash';
 import GlobalThemePlayer, { ThemeSongPayload } from './components/GlobalThemePlayer';
 import AmbientParticles from './components/AmbientParticles';
 import { soundEffects } from './services/soundEffects';
@@ -180,6 +181,36 @@ export function App() {
 
   // Global Anime Theme Song Jukebox Player State (Full Song Track or Audio Preview)
   const [activeThemeSong, setActiveThemeSong] = useState<ThemeSongPayload | null>(null);
+
+  // Crunchyroll-Style App Opening Splash Animation State
+  const [showIntroSplash, setShowIntroSplash] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const s = getUserSettings();
+    if (s.appIntroAnimationEnabled === false) return false;
+    // Don't show splash if deep linking directly to a specific reel or watch page via URL query/path
+    const search = window.location.search || '';
+    if (search.includes('reel=') || search.includes('reelId=') || window.location.pathname.startsWith('/reel/')) {
+      return false;
+    }
+    // Check if splash was already shown in the current browser session
+    try {
+      const sessionViewed = sessionStorage.getItem('anilove_app_intro_viewed');
+      return !sessionViewed;
+    } catch {
+      return true;
+    }
+  });
+
+  const handleFinishIntro = useCallback(() => {
+    setShowIntroSplash(false);
+    try {
+      sessionStorage.setItem('anilove_app_intro_viewed', 'true');
+    } catch {}
+  }, []);
+
+  const handleReplayIntro = useCallback(() => {
+    setShowIntroSplash(true);
+  }, []);
 
   // Notifications / Toasts
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -1241,6 +1272,7 @@ export function App() {
                   if (reelId) setTargetReelId(reelId);
                   handleSelectTab('reels');
                 }}
+                onReplayIntro={handleReplayIntro}
               />
             )}
           </>
@@ -1387,6 +1419,16 @@ export function App() {
         <GlobalThemePlayer
           track={activeThemeSong}
           onClose={() => setActiveThemeSong(null)}
+        />
+      )}
+
+      {/* AniLove 6–7 Second Cinematic Logo Opening Animation */}
+      {showIntroSplash && (
+        <AppIntroSplash
+          isDataReady={!isMainLoading && trendingAnime.length > 0}
+          onFinish={handleFinishIntro}
+          soundEnabled={settings.soundEffectsEnabled ?? true}
+          minDuration={7000}
         />
       )}
     </div>

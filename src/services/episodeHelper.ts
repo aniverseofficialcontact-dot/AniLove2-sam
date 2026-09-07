@@ -5,7 +5,13 @@ import { Anime } from '../types';
  * franchise sequels, and long-running series like One Piece, Conan, Naruto, Bleach, etc.
  */
 export function computeTotalEpisodes(anime?: Anime | null, details?: any): number {
-  if (!anime && !details) return 24;
+  if (!anime && !details) return 0;
+
+  // 0. Check for unreleased / upcoming media
+  const status = (details?.status || anime?.status || '').toUpperCase();
+  if (status === 'NOT_YET_RELEASED') {
+    return 0;
+  }
 
   // 1. Direct positive episodes from anime or details
   if (anime?.episodes && anime.episodes > 0) return anime.episodes;
@@ -13,10 +19,17 @@ export function computeTotalEpisodes(anime?: Anime | null, details?: any): numbe
 
   // 2. Ongoing airing anime from nextAiringEpisode
   if (details?.nextAiringEpisode?.episode) {
-    return Math.max(1, details.nextAiringEpisode.episode - 1);
+    const aired = details.nextAiringEpisode.episode - 1;
+    return Math.max(0, aired);
   }
   if ((anime as any)?.nextAiringEpisode?.episode) {
-    return Math.max(1, (anime as any).nextAiringEpisode.episode - 1);
+    const aired = (anime as any).nextAiringEpisode.episode - 1;
+    return Math.max(0, aired);
+  }
+
+  // If status is not yet released or has 0 episodes explicitly
+  if (anime?.episodes === 0 || details?.episodes === 0) {
+    return 0;
   }
 
   // 3. Title analysis for major long-running franchises when AniList returns null/incomplete counts

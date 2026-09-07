@@ -25,6 +25,7 @@ import { STREAM_PROVIDERS, DEFAULT_STREAM_PROVIDER_ID, SUPPORTED_LANGUAGES, Stre
 import { ProVideoPlayer } from './ProVideoPlayer';
 import { computeTotalEpisodes, generateEpisodeRanges } from '../services/episodeHelper';
 import { fetchFranchiseWatchOrder } from '../services/watchOrderService';
+import { useHorizontalScroll } from '../hooks/useHorizontalScroll';
 import {
   fetchExtendedEpisodesFromJikanOrKitsu,
   getCanonicalEpisodeArtwork,
@@ -122,6 +123,8 @@ export const WatchView: React.FC<WatchViewProps> = ({
   }, [settings?.preferredAudio, settings?.preferredLanguages]);
 
   const [selectedAudio, setSelectedAudio] = useState<StreamLanguage>(initialAudio);
+  const serverScroll = useHorizontalScroll({ step: 240 });
+  const rangeScroll = useHorizontalScroll({ step: 200 });
 
   // Sync if settings update
   useEffect(() => {
@@ -291,27 +294,41 @@ export const WatchView: React.FC<WatchViewProps> = ({
       const end = Math.min(start + 49, episodeList.length);
       const expectedRange = `${start}–${end}`;
       setSelectedEpisodeRange(expectedRange);
+    } else {
+      setSelectedEpisodeRange('all');
     }
   }, [episodeNumber, episodeList.length]);
+
+  // Reset range and query when anime changes
+  useEffect(() => {
+    setSelectedEpisodeRange('all');
+    setEpisodeSearchQuery('');
+  }, [anime?.id]);
 
   // Filter episodes by search query, range chunks, and sort order (capped to 50 items for superfast rendering)
   const filteredEpisodes = useMemo(() => {
     let list = episodeList;
 
     // Apply Range Filter if active and no search query
-    if (selectedEpisodeRange !== 'all' && !episodeSearchQuery.trim()) {
-      const parts = selectedEpisodeRange.split('–').map(Number);
-      if (parts.length === 2) {
+    if (selectedEpisodeRange !== 'all' && episodeRanges.length > 0 && !episodeSearchQuery.trim()) {
+      const parts = selectedEpisodeRange.split(/[–\-]/).map(Number);
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
         const [start, end] = parts;
-        list = list.slice(start - 1, end);
+        const ranged = list.slice(start - 1, end);
+        if (ranged.length > 0) {
+          list = ranged;
+        }
       }
     } else if (episodeSearchQuery.trim()) {
       const q = episodeSearchQuery.toLowerCase().trim();
+      const cleanNum = q.replace(/^(?:episode|ep|#)\s*/i, '').trim();
       list = list.filter(
         ep =>
           ep.title.toLowerCase().includes(q) ||
           `episode ${ep.number}`.includes(q) ||
-          `${ep.number}` === q
+          `ep ${ep.number}`.includes(q) ||
+          `${ep.number}` === q ||
+          `${ep.number}` === cleanNum
       );
       if (list.length > 60) {
         list = list.slice(0, 60);
@@ -325,7 +342,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
       return [...list].reverse();
     }
     return list;
-  }, [episodeList, episodeSearchQuery, selectedEpisodeRange, sortAsc]);
+  }, [episodeList, episodeSearchQuery, selectedEpisodeRange, episodeRanges, sortAsc]);
 
   const currentEpisodeData = episodeList.find(e => e.number === episodeNumber) || {
     number: episodeNumber,
@@ -435,10 +452,40 @@ export const WatchView: React.FC<WatchViewProps> = ({
               <Radio className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
               <span>Streaming Server & Language</span>
             </span>
-            <span className="text-[11px] text-neutral-500">{STREAM_PROVIDERS.length} Working Servers</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-neutral-500 hidden sm:inline">{STREAM_PROVIDERS.length} Working Servers</span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => serverScroll.scrollLeft()}
+                  disabled={!serverScroll.canScrollLeft}
+                  className="p-1 rounded-md bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-600 disabled:opacity-25 disabled:pointer-events-none transition cursor-pointer"
+                  title="Scroll servers left"
+                  aria-label="Scroll servers left"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => serverScroll.scrollRight()}
+                  disabled={!serverScroll.canScrollRight}
+                  className="p-1 rounded-md bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-600 disabled:opacity-25 disabled:pointer-events-none transition cursor-pointer"
+                  title="Scroll servers right"
+                  aria-label="Scroll servers right"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none" aria-label="Playback server and language options">
+          <div
+            ref={serverScroll.containerRef}
+            {...serverScroll.scrollHandlers}
+            className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none select-none cursor-grab active:cursor-grabbing focus:outline-none"
+            aria-label="Playback server and language options"
+            tabIndex={0}
+          >
             {/* Multi-Language Dub & Sub Toggles (Filtered by active server support) */}
             {SUPPORTED_LANGUAGES.filter(lang => {
               const currentP = STREAM_PROVIDERS.find(p => p.id === selectedServer) || STREAM_PROVIDERS[0];
@@ -698,7 +745,11 @@ export const WatchView: React.FC<WatchViewProps> = ({
 
               {/* Episode Range Chunks for Long Series (>50 episodes like One Piece, Naruto, Bleach) */}
               {episodeRanges.length > 0 && !episodeSearchQuery && (
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+                <div
+                  ref={rangeScroll.containerRef}
+                  {...rangeScroll.scrollHandlers}
+                  className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs select-none cursor-grab active:cursor-grabbing"
+                >
                   <button
                     type="button"
                     onClick={() => setSelectedEpisodeRange('all')}

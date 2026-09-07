@@ -209,16 +209,16 @@ const RENIME_DUB: StreamProvider = {
 };
 
 export const STREAM_PROVIDERS: StreamProvider[] = [
-  // 1. Anikoto HD-1 (1080p Master)
-  ANIKOTO_HD1,
-  // 2. Anikoto Vidstream (Fast Bufferless CDN)
+  // 1. Anikoto Vidstream (Fast Bufferless CDN - Default Primary)
   ANIKOTO_VIDSTREAM,
-  // 3. Tatakai Multi-Audio Engine
-  TATAKAI_MULTI,
-  // 4. Anify Media Cloud
-  ANIFY_CLOUD,
-  // 5. Miruro Ultra HLS
+  // 2. Miruro Ultra HLS (Master HLS Stream - Primary Mirror)
   MIRURO_STREAM,
+  // 3. Anikoto HD-1 (1080p Master)
+  ANIKOTO_HD1,
+  // 4. Tatakai Multi-Audio Engine
+  TATAKAI_MULTI,
+  // 5. Anify Media Cloud
+  ANIFY_CLOUD,
   // 6. Anikoto VidPlay (Dual Sub/Dub)
   ANIKOTO_VIDPLAY,
   // 7. Miruro Pro Multi-Mirror
@@ -237,7 +237,7 @@ export const STREAM_PROVIDERS: StreamProvider[] = [
   ANIKOTO_ULTRA,
 ];
 
-export const DEFAULT_STREAM_PROVIDER_ID: StreamServerId = 'anikoto-hd1';
+export const DEFAULT_STREAM_PROVIDER_ID: StreamServerId = 'anikoto-vidstream';
 
 export const isStreamProviderId = (providerId: string): providerId is StreamServerId =>
   STREAM_PROVIDERS.some(provider => provider.id === providerId);
@@ -314,6 +314,18 @@ export async function resolveEpisodeSource({
   const animeTitle = englishTitle || romajiTitle || userTitle || 'Anime';
   const anilistId = anime.id;
 
+  // Immediate guard: Do not attempt to resolve unreleased seasons (e.g. Oshi no Ko Season 3/4)
+  const isUnreleasedAnime =
+    anime.status === 'NOT_YET_RELEASED' ||
+    (/\b(season\s*[3-9]|3rd\s*season|4th\s*season|5th\s*season)\b/i.test(animeTitle) && /oshi\s*no\s*ko/i.test(animeTitle));
+
+  if (isUnreleasedAnime) {
+    return {
+      status: 'error',
+      message: `"${animeTitle}" has not been released yet. Streaming will become available once the season begins broadcast.`,
+    };
+  }
+
   let desiredServerName = serverName;
   if (!desiredServerName && provider.serverMatch) {
     desiredServerName = provider.serverMatch;
@@ -360,6 +372,12 @@ export async function resolveEpisodeSource({
 
     if (res.ok) {
       const data = await res.json();
+      if (data.unreleased) {
+        return {
+          status: 'error',
+          message: data.message || `"${animeTitle}" has not been released yet.`,
+        };
+      }
       if (data.success && data.streamUrl) {
         return {
           status: 'available',

@@ -253,8 +253,57 @@ async function startServer() {
       list = list.filter(r => (r.cleanTitle && r.cleanTitle.toLowerCase().includes(search)) || (r.name && r.name.toLowerCase().includes(search)) || (r.title && r.title.toLowerCase().includes(search)));
     }
 
+function stratifiedMultiDriveShuffle(reels: any[]): any[] {
+  if (!reels || reels.length === 0) return [];
+  const driveMap = new Map<string, any[]>();
+  for (const r of reels) {
+    const k = r.folderId || r.folderName || 'DefaultSource';
+    let group = driveMap.get(k);
+    if (!group) {
+      group = [];
+      driveMap.set(k, group);
+    }
+    group.push(r);
+  }
+
+  // Shuffle within each drive using Fisher-Yates
+  const activeDrives: any[][] = [];
+  driveMap.forEach(group => {
+    if (group.length > 0) {
+      const arr = [...group];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      activeDrives.push(arr);
+    }
+  });
+
+  if (activeDrives.length === 0) return [];
+  // Shuffle order of active drives
+  for (let i = activeDrives.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [activeDrives[i], activeDrives[j]] = [activeDrives[j], activeDrives[i]];
+  }
+
+  const result: any[] = [];
+  const pointers = new Array(activeDrives.length).fill(0);
+  while (result.length < reels.length) {
+    let added = false;
+    for (let d = 0; d < activeDrives.length; d++) {
+      if (pointers[d] < activeDrives[d].length) {
+        result.push(activeDrives[d][pointers[d]]);
+        pointers[d]++;
+        added = true;
+      }
+    }
+    if (!added) break;
+  }
+  return result;
+}
+
     if (req.query.shuffle === 'true' || req.query.random === 'true') {
-      list = list.sort(() => Math.random() - 0.5);
+      list = stratifiedMultiDriveShuffle(list);
     }
 
     const offset = parseInt(req.query.offset as string) || 0;
@@ -380,20 +429,23 @@ async function startServer() {
 
   // In-Memory RAM Cache for Reel Thumbnails
   const reelsThumbnailCache = new Map<string, { buffer: Buffer; contentType: string; lastAccessed: number }>();
-  const MAX_CACHED_THUMBNAILS = 300;
+  const MAX_CACHED_THUMBNAILS = 500;
 
   async function fetchAndCacheReelThumbnail(fileId: string): Promise<{ buffer: Buffer; contentType: string } | null> {
-    if (reelsThumbnailCache.has(fileId)) {
-      const cached = reelsThumbnailCache.get(fileId)!;
+    const resolvedId = resolveReelFileId(fileId) || fileId;
+
+    if (reelsThumbnailCache.has(resolvedId)) {
+      const cached = reelsThumbnailCache.get(resolvedId)!;
       cached.lastAccessed = Date.now();
       return cached;
     }
 
     const candidateUrls = [
-      `https://lh3.googleusercontent.com/d/${fileId}`,
-      `https://lh3.googleusercontent.com/d/${fileId}=w600-h900`,
-      `https://drive.google.com/thumbnail?id=${fileId}&sz=w600`,
-      `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`,
+      `https://lh3.googleusercontent.com/d/${resolvedId}`,
+      `https://drive.google.com/thumbnail?id=${resolvedId}&sz=w1200`,
+      `https://drive.google.com/thumbnail?id=${resolvedId}&sz=w800`,
+      `https://drive.google.com/thumbnail?id=${resolvedId}&sz=w600`,
+      `https://drive.google.com/thumbnail?id=${resolvedId}&sz=w400`,
     ];
 
     for (const targetUrl of candidateUrls) {
@@ -403,7 +455,7 @@ async function startServer() {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
           },
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(6000),
         });
 
         if (remoteRes.ok && remoteRes.body) {
@@ -411,28 +463,48 @@ async function startServer() {
           if (contentType.startsWith('image/')) {
             const arrayBuf = await remoteRes.arrayBuffer();
             const buffer = Buffer.from(arrayBuf);
-            const entry = { buffer, contentType, lastAccessed: Date.now() };
+            if (buffer.length > 500) {
+              const entry = { buffer, contentType, lastAccessed: Date.now() };
 
-            if (reelsThumbnailCache.size >= MAX_CACHED_THUMBNAILS) {
-              let oldestKey: string | null = null;
-              let oldestTime = Infinity;
-              for (const [key, val] of reelsThumbnailCache.entries()) {
-                if (val.lastAccessed < oldestTime) {
-                  oldestTime = val.lastAccessed;
-                  oldestKey = key;
+              if (reelsThumbnailCache.size >= MAX_CACHED_THUMBNAILS) {
+                let oldestKey: string | null = null;
+                let oldestTime = Infinity;
+                for (const [key, val] of reelsThumbnailCache.entries()) {
+                  if (val.lastAccessed < oldestTime) {
+                    oldestTime = val.lastAccessed;
+                    oldestKey = key;
+                  }
                 }
+                if (oldestKey) reelsThumbnailCache.delete(oldestKey);
               }
-              if (oldestKey) reelsThumbnailCache.delete(oldestKey);
-            }
 
-            reelsThumbnailCache.set(fileId, entry);
-            return entry;
+              reelsThumbnailCache.set(resolvedId, entry);
+              if (resolvedId !== fileId) {
+                reelsThumbnailCache.set(fileId, entry);
+              }
+              return entry;
+            }
           }
         }
       } catch {
-        // Try next candidate
+        // Try next candidate URL
       }
     }
+
+    // High-resolution fallback banner so social share cards NEVER render a blank/broken box
+    try {
+      const fs = await import('fs');
+      const fallbackPath = path.join(process.cwd(), 'public/og-banner.jpg');
+      if (fs.existsSync(fallbackPath)) {
+        const buffer = fs.readFileSync(fallbackPath);
+        const fallbackEntry = { buffer, contentType: 'image/jpeg', lastAccessed: Date.now() };
+        reelsThumbnailCache.set(resolvedId, fallbackEntry);
+        return fallbackEntry;
+      }
+    } catch (e) {
+      console.warn('[Thumbnail Fallback Error]:', e);
+    }
+
     return null;
   }
 
@@ -471,18 +543,45 @@ async function startServer() {
   function resolveReelFileId(paramId?: string): string {
     if (!paramId) return '';
     const clean = String(paramId).trim();
-    if (clean.length >= 25 && inMemoryReels.some(r => r.id === clean)) {
-      return clean;
+    if (clean.length >= 25) {
+      const exact = inMemoryReels.find(r => r.id === clean);
+      if (exact) return exact.id;
     }
     const cleanLower = clean.toLowerCase();
-    const matched = inMemoryReels.find(r => 
-      r.id === clean ||
-      r.id.toLowerCase() === cleanLower ||
+
+    // 1. Exact or case-insensitive match
+    const directMatch = inMemoryReels.find(r => 
+      r.id === clean || 
+      r.id.toLowerCase() === cleanLower
+    );
+    if (directMatch) return directMatch.id;
+
+    // 2. Strong prefix match (Drive video IDs are 28-35 chars; first 15-20 chars are unique)
+    if (clean.length >= 15) {
+      const prefix20 = cleanLower.slice(0, 20);
+      const prefix15 = cleanLower.slice(0, 15);
+      const prefixMatch = inMemoryReels.find(r => {
+        const rLower = r.id.toLowerCase();
+        return rLower.startsWith(prefix20) || rLower.startsWith(prefix15);
+      });
+      if (prefixMatch) return prefixMatch.id;
+    }
+
+    // 3. Typo/OCR-tolerant match (mistaking lowercase 'l' for uppercase 'I' or digit '1', or '0' for 'O')
+    if (clean.length >= 25) {
+      const norm = (s: string) => s.toLowerCase().replace(/[il1|]/g, '1').replace(/[o0]/g, '0');
+      const cleanNorm = norm(clean);
+      const fuzzyMatch = inMemoryReels.find(r => norm(r.id) === cleanNorm);
+      if (fuzzyMatch) return fuzzyMatch.id;
+    }
+
+    // 4. Substring or title match
+    const titleMatch = inMemoryReels.find(r => 
       (clean.length >= 5 && r.id.toLowerCase().startsWith(cleanLower)) ||
       (r.title && r.title.toLowerCase().includes(cleanLower)) ||
       (r.cleanTitle && r.cleanTitle.toLowerCase().includes(cleanLower))
     );
-    return matched ? matched.id : clean;
+    return titleMatch ? titleMatch.id : clean;
   }
 
   // Single Reel Metadata Lookup Endpoint (for direct share links & deep links)
@@ -718,24 +817,37 @@ async function startServer() {
 
   // Secure Thumbnail Proxy with RAM Caching & Google Drive fallback endpoints
   app.get('/api/reels/thumbnail/:id', async (req, res) => {
-    const fileId = resolveReelFileId(req.params.id);
-    if (!fileId || fileId.length < 15) {
-      res.status(400).send('Invalid file id');
-      return;
-    }
+    const rawId = req.params.id;
+    const fileId = resolveReelFileId(rawId) || rawId;
 
     try {
-      const cached = await fetchAndCacheReelThumbnail(fileId);
-      if (cached) {
-        res.setHeader('Content-Type', cached.contentType);
-        res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-        res.setHeader('Content-Length', cached.buffer.length);
-        res.end(cached.buffer);
+      if (fileId && fileId.length >= 10) {
+        const cached = await fetchAndCacheReelThumbnail(fileId);
+        if (cached && cached.buffer) {
+          res.setHeader('Content-Type', cached.contentType || 'image/jpeg');
+          res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+          res.setHeader('Content-Length', cached.buffer.length);
+          res.end(cached.buffer);
+          return;
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[Reels Thumbnail] Error fetching ${fileId}:`, err.message);
+    }
+
+    // Always serve reliable banner image if specific reel thumbnail could not be retrieved
+    try {
+      const fs = await import('fs');
+      const fallbackPath = path.join(process.cwd(), 'public/og-banner.jpg');
+      if (fs.existsSync(fallbackPath)) {
+        const buf = fs.readFileSync(fallbackPath);
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.setHeader('Content-Length', buf.length);
+        res.end(buf);
         return;
       }
-    } catch {
-      // Fall through to 404
-    }
+    } catch {}
 
     if (!res.headersSent) res.status(404).send('Thumbnail not found');
   });
@@ -2661,11 +2773,6 @@ async function startServer() {
       `<meta property="og:image:width" content="1280" />`,
       `<meta property="og:image:height" content="720" />`,
       `<meta property="og:image:alt" content="${escapeHtmlAttr(og.title)}" />`,
-      og.videoUrl ? `<meta property="og:video" content="${escapeHtmlAttr(og.videoUrl)}" />` : '',
-      og.videoUrl ? `<meta property="og:video:secure_url" content="${escapeHtmlAttr(og.videoUrl)}" />` : '',
-      og.videoUrl ? `<meta property="og:video:type" content="video/mp4" />` : '',
-      og.videoUrl ? `<meta property="og:video:width" content="720" />` : '',
-      og.videoUrl ? `<meta property="og:video:height" content="1280" />` : '',
       `<meta name="twitter:card" content="summary_large_image" />`,
       `<meta name="twitter:site" content="@AniLove" />`,
       `<meta name="twitter:title" content="${escapeHtmlAttr(og.title)}" />`,
@@ -2722,13 +2829,14 @@ async function startServer() {
       }
 
       // 2. Determine public absolute base origin
-      const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+      const rawProto = req.get('x-forwarded-proto') || req.protocol || 'https';
       const host = req.get('x-forwarded-host') || req.get('host') || `localhost:${PORT}`;
+      const proto = host.includes('localhost') ? rawProto : 'https';
       const origin = `${proto}://${host}`;
 
-      let title = 'AniLove - Anime Tracker & Discovery';
-      let description = 'Watch HD anime edits, track episodes, and discover trending anime on AniLove.';
-      let imageUrl = `${origin}/icon-512.svg`;
+      let title = 'AniLove - Anime Tracker, Streaming & Edits';
+      let description = 'Discover trending anime, stream episodes, and watch HD anime edits on AniLove. Your ultimate anime companion.';
+      let imageUrl = `${origin}/og-banner.jpg`;
       let videoUrl: string | undefined = undefined;
       let pageUrl = `${origin}${req.originalUrl}`;
       let isVideo = false;
@@ -2750,9 +2858,8 @@ async function startServer() {
         title = `${cleanName} - AniLove Reels`;
         description = `Watch "${cleanName}" in HD on AniLove. Tap to play anime edit!`;
         imageUrl = `${origin}/api/reels/thumbnail/${encodeURIComponent(effectiveId)}`;
-        videoUrl = `${origin}/api/reels/stream/${encodeURIComponent(effectiveId)}`;
         pageUrl = `${origin}/reel/${encodeURIComponent(effectiveId)}`;
-        isVideo = true;
+        isVideo = false;
       }
 
       const fs = await import('fs');
@@ -2782,6 +2889,12 @@ async function startServer() {
       return next();
     }
   };
+
+  // Static file serving for public folder assets (banners, icons, images)
+  app.use(express.static(path.join(process.cwd(), 'public'), {
+    maxAge: '7d',
+    immutable: false,
+  }));
 
   // Vite middleware in dev or static files in production
   if (process.env.NODE_ENV !== 'production') {
@@ -3041,13 +3154,16 @@ function generateSearchQueries(rawTitles: string[]): string[] {
       queries.add(mainTitle);
     }
 
-    // 3. Remove Season / Part / Cour suffixes
-    const withoutSeason = clean
-      .replace(/\b(season\s*\d+|2nd\s*season|3rd\s*season|4th\s*season|\d+(st|nd|rd|th)\s*season|season\s*[ivx]+|part\s*\d+|cour\s*\d+|the\s*final\s*season)\b/gi, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (withoutSeason.length >= 3) {
-      queries.add(withoutSeason);
+    // 3. Remove Season / Part / Cour suffixes ONLY if not an explicit sequel request
+    const hasExplicitSeason = /\b(season\s*[2-9]|2nd\s*season|3rd\s*season|4th\s*season|\d+(nd|rd|th)\s*season|season\s*[ivx]+)\b/i.test(clean);
+    if (!hasExplicitSeason) {
+      const withoutSeason = clean
+        .replace(/\b(season\s*\d+|2nd\s*season|3rd\s*season|4th\s*season|\d+(st|nd|rd|th)\s*season|season\s*[ivx]+|part\s*\d+|cour\s*\d+|the\s*final\s*season)\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (withoutSeason.length >= 3) {
+        queries.add(withoutSeason);
+      }
     }
 
     // 4. Roman numerals vs standard numbers conversion (e.g. "Season 2" <-> "Season II" <-> "2nd Season")
@@ -3061,6 +3177,17 @@ function generateSearchQueries(rawTitles: string[]): string[] {
     } else if (/\bseason\s*3\b/i.test(clean)) {
       queries.add(clean.replace(/\bseason\s*3\b/i, '3rd Season'));
       queries.add(clean.replace(/\bseason\s*3\b/i, 'Season III'));
+      queries.add(clean.replace(/\bseason\s*3\b/i, 'S3'));
+    } else if (/\b3rd\s*season\b/i.test(clean)) {
+      queries.add(clean.replace(/\b3rd\s*season\b/i, 'Season 3'));
+      queries.add(clean.replace(/\b3rd\s*season\b/i, 'Season III'));
+    } else if (/\bseason\s*4\b/i.test(clean)) {
+      queries.add(clean.replace(/\bseason\s*4\b/i, '4th Season'));
+      queries.add(clean.replace(/\bseason\s*4\b/i, 'Season IV'));
+      queries.add(clean.replace(/\bseason\s*4\b/i, 'S4'));
+    } else if (/\b4th\s*season\b/i.test(clean)) {
+      queries.add(clean.replace(/\b4th\s*season\b/i, 'Season 4'));
+      queries.add(clean.replace(/\b4th\s*season\b/i, 'Season IV'));
     }
 
     // 5. Clean punctuation query
@@ -3122,19 +3249,18 @@ function scoreAnimeCandidate(
 
   // 2. Strict Season checks
   if (asksForSeason2) {
-    if (isItemSeason2) score += 120;
-    else if (isItemSeason3 || isItemSeason4) score -= 150;
-    else score -= 40;
+    if (isItemSeason2) score += 180;
+    else return -999; // Explicitly reject non-Season-2 anime
   } else if (asksForSeason3) {
-    if (isItemSeason3) score += 120;
-    else score -= 120;
+    if (isItemSeason3) score += 180;
+    else return -999; // Explicitly reject non-Season-3 anime
   } else if (asksForSeason4) {
-    if (isItemSeason4) score += 120;
-    else score -= 120;
+    if (isItemSeason4) score += 180;
+    else return -999; // Explicitly reject non-Season-4 anime
   } else {
-    // User is searching for Season 1
+    // User is searching for Season 1 (or no explicit season)
     if (isItemSeason2 || isItemSeason3 || isItemSeason4) {
-      score -= 150;
+      return -999; // Never match Season 2/3/4 when searching for Season 1
     }
   }
 
@@ -3259,6 +3385,15 @@ function generateUniversalFallbackStream(input: {
   const isDub = String(language || 'DUB').toUpperCase() === 'DUB';
   const displayTitle = englishTitle || animeTitle || romajiTitle || 'Anime';
   const slug = displayTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+  // If this is an unreleased franchise sequel (e.g. Oshi no Ko Season 3 or 4), do not load random fallbacks
+  if (/\b(season\s*[3-9]|3rd\s*season|4th\s*season|5th\s*season)\b/i.test(displayTitle) && /oshi\s*no\s*ko/i.test(displayTitle)) {
+    return {
+      success: false,
+      unreleased: true,
+      message: `${displayTitle} has not been released yet and has not aired any episodes.`,
+    };
+  }
 
   const availableServers = [
     { name: 'VidLink Ultra HD', type: isDub ? 'DUB' : 'SUB', linkId: `https://vidlink.pro/anime/${anilistId}/${epNum}?dub=${isDub ? 'true' : 'false'}` },
@@ -3391,6 +3526,15 @@ async function resolveAnikotoInternal(input: {
   }
 
   if (!bestItem) {
+    const isUnreleasedSequel = rawTitles.some(t => /\b(season\s*[3-9]|3rd\s*season|4th\s*season|5th\s*season)\b/i.test(t));
+    if (isUnreleasedSequel && rawTitles.some(t => /oshi\s*no\s*ko/i.test(t))) {
+      return {
+        success: false,
+        unreleased: true,
+        message: `This season (${englishTitle || animeTitle}) has not been released yet and has no aired episodes.`,
+      };
+    }
+
     return generateUniversalFallbackStream({
       anilistId,
       animeTitle,

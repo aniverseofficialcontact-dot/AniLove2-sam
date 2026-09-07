@@ -43,7 +43,11 @@ import {
   Film,
   BookmarkCheck,
   Bookmark,
-  Play
+  Play,
+  Share2,
+  Send,
+  Copy,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { UserSettings, UserMediaListItem, UserProfile, GachaCard, StreamServerId, AnimeReel } from '../types';
@@ -67,6 +71,7 @@ interface AccountViewProps {
   onLockSession?: () => void;
   onUnlockSession?: () => void;
   onNavigateToReels?: (reelId?: string) => void;
+  onReplayIntro?: () => void;
 }
 
 // Preset High-Resolution Anime Avatars
@@ -109,6 +114,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
   onLockSession,
   onUnlockSession,
   onNavigateToReels,
+  onReplayIntro,
 }) => {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
@@ -146,6 +152,58 @@ export const AccountView: React.FC<AccountViewProps> = ({
   const [isSwitchProfileOpen, setIsSwitchProfileOpen] = useState(false);
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [isNewProfileModalOpen, setIsNewProfileModalOpen] = useState(false);
+  const [isShareWebsiteModalOpen, setIsShareWebsiteModalOpen] = useState(false);
+  const [copiedWebsiteLink, setCopiedWebsiteLink] = useState(false);
+
+  // Share Website Handlers
+  const handleShareWebsite = async () => {
+    const websiteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://anilove.app';
+    const shareTitle = 'AniLove - Anime Tracker, Streaming & Edits';
+    const shareText = 'Discover trending anime, stream episodes, and watch HD anime edits on AniLove. Your ultimate anime companion!';
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: shareTitle,
+          text: shareText,
+          url: websiteUrl,
+        });
+        onShowToast('success', 'Thank you for sharing AniLove!', 'Shared');
+        return;
+      } catch (err: any) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+
+    // Open dedicated visual share modal with card preview & social buttons
+    setIsShareWebsiteModalOpen(true);
+  };
+
+  const handleCopyWebsiteLink = async () => {
+    const websiteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://anilove.app';
+    let copied = false;
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(websiteUrl);
+        copied = true;
+      } catch {}
+    }
+    if (!copied) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = websiteUrl;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        copied = document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch {}
+    }
+    setCopiedWebsiteLink(true);
+    setTimeout(() => setCopiedWebsiteLink(false), 2500);
+    onShowToast('success', 'Website link copied to clipboard! Share it with your friends.', 'Link Copied');
+  };
 
   // Owned Gacha Cards for profile avatars (sorted by awakening level descending)
   const [vaultCards, setVaultCards] = useState<GachaCard[]>(() => {
@@ -668,6 +726,15 @@ export const AccountView: React.FC<AccountViewProps> = ({
               <span>Switch Profile</span>
             </button>
 
+            <button
+              onClick={handleShareWebsite}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-pink-500/20 via-purple-500/20 to-pink-500/20 hover:from-pink-500/30 hover:to-purple-500/30 border border-pink-500/40 text-pink-200 hover:text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer backdrop-blur-md active:scale-95 shadow-sm"
+              title="Share AniLove website with thumbnail card preview"
+            >
+              <Share2 className="w-3.5 h-3.5 text-pink-400" />
+              <span>Share Website</span>
+            </button>
+
             {currentUser ? (
               <button
                 onClick={handleSignOut}
@@ -1097,6 +1164,67 @@ export const AccountView: React.FC<AccountViewProps> = ({
                           <span
                             className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-transform ${
                               settings.enable3DCardPreview !== false ? 'right-1' : 'left-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* App Opening Cinematic Logo Intro (AniLove 4s Intro) */}
+                    <div className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-xl bg-gradient-to-br from-pink-500/20 to-purple-500/20 text-pink-400 border border-pink-500/30 shadow-sm">
+                          <Film className="w-4 h-4 animate-pulse" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-white flex items-center gap-2">
+                            <span>Cinematic Logo Intro</span>
+                            <span className="px-2 py-0.2 rounded-full bg-gradient-to-r from-pink-500 to-purple-600 text-white text-[9px] font-black uppercase">
+                              AniLove 7S
+                            </span>
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            6–7s cinematic anime intro: glowing heart formation, anime sunset sky parallax scene, and AniLove logo reveal.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-end sm:self-auto">
+                        {onReplayIntro && (
+                          <button
+                            type="button"
+                            onClick={onReplayIntro}
+                            className="px-3 py-1 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 active:scale-95 text-pink-300 border border-pink-500/30 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                            title="Play the 6–7s anime opening animation now"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-current" />
+                            <span>Preview</span>
+                          </button>
+                        )}
+
+                        <span
+                          className={`text-xs font-bold px-2 py-0.5 rounded-lg border ${
+                            settings.appIntroAnimationEnabled !== false
+                              ? 'bg-pink-500/20 text-pink-300 border-pink-500/40'
+                              : 'bg-white/5 text-slate-400 border-white/10'
+                          }`}
+                        >
+                          {settings.appIntroAnimationEnabled !== false ? 'Enabled' : 'Disabled'}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextVal = settings.appIntroAnimationEnabled === false ? true : false;
+                            onSaveSettings({ ...settings, appIntroAnimationEnabled: nextVal });
+                          }}
+                          className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
+                            settings.appIntroAnimationEnabled !== false ? 'bg-pink-500 shadow-md shadow-pink-500/30' : 'bg-white/10'
+                          }`}
+                        >
+                          <span
+                            className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-transform ${
+                              settings.appIntroAnimationEnabled !== false ? 'right-1' : 'left-1'
                             }`}
                           />
                         </button>
@@ -2787,6 +2915,164 @@ export const AccountView: React.FC<AccountViewProps> = ({
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL 5: SHARE WEBSITE WITH THUMBNAIL CARD PREVIEW */}
+      <AnimatePresence>
+        {isShareWebsiteModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md rounded-3xl bg-slate-900 border border-white/15 p-6 space-y-5 shadow-2xl overflow-hidden relative"
+            >
+              {/* Background ambient glow */}
+              <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-pink-500/15 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-48 h-48 bg-violet-600/15 rounded-full blur-3xl pointer-events-none" />
+
+              <div className="relative z-10 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-gradient-to-br from-pink-500/20 to-purple-500/20 text-pink-400 border border-pink-500/30 shadow-sm">
+                    <Share2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white">Share AniLove</h3>
+                    <p className="text-xs text-slate-400">Share website with rich thumbnail card preview</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsShareWebsiteModalOpen(false)}
+                  className="p-2 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Website Card Preview (Exact Social Share Thumbnail Card) */}
+              <div className="relative z-10 rounded-2xl overflow-hidden border border-white/15 bg-slate-950/80 shadow-xl">
+                <div className="relative h-44 sm:h-48 w-full bg-slate-900 overflow-hidden">
+                  <img
+                    src="/og-banner.jpg"
+                    alt="AniLove Website Preview Banner"
+                    className="w-full h-full object-cover object-center"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = '/assets/anime_sunset_city.jpg';
+                    }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/30 to-transparent" />
+                  <div className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/15 text-[10px] font-black text-pink-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3 text-pink-400" />
+                    <span>AniLove Web App</span>
+                  </div>
+                  <div className="absolute bottom-3 left-3 right-3">
+                    <span className="text-[11px] font-mono text-pink-400 font-semibold tracking-wide">
+                      {typeof window !== 'undefined' ? window.location.host : 'anilove.app'}
+                    </span>
+                    <h4 className="text-sm font-black text-white leading-snug line-clamp-1 drop-shadow-md">
+                      AniLove - Anime Tracker, Streaming & Edits
+                    </h4>
+                  </div>
+                </div>
+                <div className="p-3.5 space-y-1">
+                  <p className="text-xs text-slate-300 line-clamp-2 leading-relaxed">
+                    Discover trending anime, stream episodes, and watch HD anime edits on AniLove. Your ultimate anime companion.
+                  </p>
+                </div>
+              </div>
+
+              {/* URL Field with Quick Copy */}
+              <div className="relative z-10 space-y-1.5">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Website Share Link
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-xs text-slate-300 font-mono truncate select-all">
+                    {typeof window !== 'undefined' ? window.location.origin : 'https://anilove.app'}
+                  </div>
+                  <button
+                    onClick={handleCopyWebsiteLink}
+                    className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0 active:scale-95 ${
+                      copiedWebsiteLink
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        : 'bg-white/10 hover:bg-white/15 text-white border border-white/15'
+                    }`}
+                  >
+                    {copiedWebsiteLink ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Social Share Buttons */}
+              <div className="relative z-10 pt-1 space-y-2">
+                <div className="grid grid-cols-3 gap-2">
+                  {/* WhatsApp */}
+                  <a
+                    href={`https://api.whatsapp.com/send?text=${encodeURIComponent('Discover trending anime, stream episodes, and watch HD anime edits on AniLove: ' + (typeof window !== 'undefined' ? window.location.origin : ''))}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="py-2.5 px-3 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 border border-[#25D366]/30 text-[#25D366] text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95 text-center"
+                  >
+                    <Send className="w-3.5 h-3.5 rotate-45" />
+                    <span>WhatsApp</span>
+                  </a>
+
+                  {/* Telegram */}
+                  <a
+                    href={`https://t.me/share/url?url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.origin : '')}&text=${encodeURIComponent('Discover trending anime and watch HD anime edits on AniLove!')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="py-2.5 px-3 rounded-xl bg-[#0088cc]/15 hover:bg-[#0088cc]/25 border border-[#0088cc]/30 text-[#0088cc] text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95 text-center"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Telegram</span>
+                  </a>
+
+                  {/* Twitter / X */}
+                  <a
+                    href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.origin : '')}&text=${encodeURIComponent('Discover trending anime, stream episodes, and watch HD anime edits on AniLove!')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="py-2.5 px-3 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 hover:text-white text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95 text-center"
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>X / Twitter</span>
+                  </a>
+                </div>
+
+                {/* System Native Share Button */}
+                {typeof navigator !== 'undefined' && !!navigator.share && (
+                  <button
+                    onClick={async () => {
+                      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+                      try {
+                        await navigator.share({
+                          title: 'AniLove - Anime Tracker, Streaming & Edits',
+                          text: 'Discover trending anime, stream episodes, and watch HD anime edits on AniLove!',
+                          url: origin,
+                        });
+                      } catch {}
+                    }}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-violet-600 hover:from-pink-600 hover:to-violet-700 text-white text-xs font-extrabold shadow-lg shadow-pink-500/25 transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    <span>Open System Share Sheet</span>
+                  </button>
+                )}
+              </div>
             </motion.div>
           </div>
         )}

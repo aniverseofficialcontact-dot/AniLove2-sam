@@ -33,6 +33,7 @@ import {
   clearReelsSession
 } from '../services/reelsService';
 import { reelMediaCache } from '../services/reelMediaCache';
+import { reelDeckManager, recordReelAsWatched } from '../services/reelRandomizer';
 
 interface ReelsViewProps {
   onBack?: () => void;
@@ -125,6 +126,8 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
   const touchStartXRef = useRef<number | null>(null);
   const touchStartTimeRef = useRef<number>(0);
   const hasMovedSignificantRef = useRef<boolean>(false);
+  const isManuallyPausedRef = useRef<boolean>(false);
+  const hasUnlockedAudioRef = useRef<boolean>(false);
 
   // Synchronize Saved Status from localStorage
   const refreshSavedMap = useCallback(() => {
@@ -142,14 +145,17 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
     return () => window.removeEventListener('anilove-saved-reels-updated', refreshSavedMap);
   }, [refreshSavedMap]);
 
-  // Helper: Pick a truly random reel from available pool
+  // Helper: Pick a truly balanced, non-repeating reel using multi-drive stratified distribution
   const pickRandomReel = useCallback((pool: AnimeReel[], excludeIds: string[] = []): AnimeReel | null => {
     if (!pool || pool.length === 0) return null;
-    const candidates = pool.filter(r => !excludeIds.includes(r.id));
-    const selectionPool = candidates.length > 0 ? candidates : pool;
-    const randIdx = Math.floor(Math.random() * selectionPool.length);
-    return selectionPool[randIdx];
-  }, []);
+    if (filterMode === 'saved') {
+      const candidates = pool.filter(r => !excludeIds.includes(r.id));
+      const selectionPool = candidates.length > 0 ? candidates : pool;
+      const randIdx = Math.floor(Math.random() * selectionPool.length);
+      return selectionPool[randIdx];
+    }
+    return reelDeckManager.pickNextReel(pool, excludeIds);
+  }, [filterMode]);
 
   // Filter pool by saved mode
   const currentPool = React.useMemo(() => {
@@ -189,20 +195,14 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
       initialReel = pool.find(r => r.id === startReelId) || null;
     }
     if (!initialReel) {
-      initialReel = pickRandomReel(pool, []);
+      initialReel = reelDeckManager.pickNextReel(pool, []);
     }
 
     if (initialReel) {
-      // Build an initial queue with the current reel + next 3 upcoming reels
+      // Build an initial queue with current reel + next 3 stratified reels
       const queue: AnimeReel[] = [initialReel];
-      const excluded = [initialReel.id];
-      for (let i = 0; i < 3; i++) {
-        const next = pickRandomReel(pool, excluded);
-        if (next) {
-          queue.push(next);
-          excluded.push(next.id);
-        }
-      }
+      const upcoming = reelDeckManager.drawNextReels(pool, 3, [initialReel.id]);
+      queue.push(...upcoming);
 
       setFeedHistory(queue);
       setHistoryIndex(0);
@@ -210,11 +210,11 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
       // Immediately preload starting reel
       reelMediaCache.preloadReel(initialReel.id);
 
-      // Pre-warm server buffer cache and download next 2+ reels in background immediately
+      // Pre-warm server buffer cache and download upcoming reels in background
       const toWarm = queue.map(r => r.id);
       preloadReels(toWarm);
     }
-  }, [filterMode, pickRandomReel]);
+  }, [filterMode]);
 
   // Initial Load on mount (Update from API in background while instantly displaying bundled reels)
   useEffect(() => {
@@ -327,26 +327,26 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
     const remainingAhead = feedHistory.length - 1 - historyIndex;
     if (remainingAhead < 3) {
       const needed = 3 - remainingAhead;
-      const excludeIds = feedHistory.slice(-25).map(r => r.id);
-      const newItems: AnimeReel[] = [];
-      for (let i = 0; i < needed; i++) {
-        const item = pickRandomReel(currentPool, [...excludeIds, ...newItems.map(r => r.id)]);
-        if (item) {
-          newItems.push(item);
-          excludeIds.push(item.id);
-        }
-      }
+      const excludeIds = feedHistory.map(r => r.id);
+      const newItems = reelDeckManager.drawNextReels(currentPool, needed, excludeIds);
       if (newItems.length > 0) {
         setFeedHistory(prev => [...prev, ...newItems]);
       }
     }
-  }, [historyIndex, feedHistory.length, currentPool, filterMode, pickRandomReel]);
+  }, [historyIndex, feedHistory.length, currentPool, filterMode]);
 
   // Current active reel & upcoming preloaded reels in the pipeline
   const currentReel = feedHistory[historyIndex] || null;
   const nextReel1 = feedHistory[historyIndex + 1] || null;
   const nextReel2 = feedHistory[historyIndex + 2] || null;
   const nextReel3 = feedHistory[historyIndex + 3] || null;
+
+  // Proactively record active reel in persistent watched history
+  useEffect(() => {
+    if (currentReel?.id) {
+      recordReelAsWatched(currentReel.id);
+    }
+  }, [currentReel?.id]);
 
   // Proactively warm in-memory media cache for active reel
   useEffect(() => {
@@ -402,6 +402,7 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
 
   // Auto-play and reset video whenever historyIndex or currentReel changes (Sound is ALWAYS ON - never muted)
   useEffect(() => {
+    isManuallyPausedRef.current = false;
     const video = getActiveVideo();
     if (!video || !currentReel) return;
 
@@ -428,14 +429,16 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
     }
   }, [historyIndex, currentReel, getActiveVideo]);
 
-  // Global interaction listener to guarantee sound is active and playing on first touch/click anywhere
+  // One-time user gesture listener to unlock unmuted audio if browser policy held initial autoplay
   useEffect(() => {
-    const activateSoundAndPlay = () => {
+    const unlockAudio = () => {
+      hasUnlockedAudioRef.current = true;
       const v = getActiveVideo();
       if (v) {
         v.muted = false;
         v.volume = 1.0;
-        if (v.paused) {
+        // Only trigger play if user hasn't explicitly paused the video!
+        if (v.paused && !isManuallyPausedRef.current) {
           v.play()
             .then(() => {
               setIsPlaying(true);
@@ -443,27 +446,30 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
             .catch(() => {});
         }
       }
+      cleanup();
     };
 
-    window.addEventListener('click', activateSoundAndPlay, { passive: true });
-    window.addEventListener('touchstart', activateSoundAndPlay, { passive: true });
-    window.addEventListener('touchend', activateSoundAndPlay, { passive: true });
-    window.addEventListener('pointerdown', activateSoundAndPlay, { passive: true });
-    window.addEventListener('keydown', activateSoundAndPlay, { passive: true });
-    window.addEventListener('wheel', activateSoundAndPlay, { passive: true });
-    return () => {
-      window.removeEventListener('click', activateSoundAndPlay);
-      window.removeEventListener('touchstart', activateSoundAndPlay);
-      window.removeEventListener('touchend', activateSoundAndPlay);
-      window.removeEventListener('pointerdown', activateSoundAndPlay);
-      window.removeEventListener('keydown', activateSoundAndPlay);
-      window.removeEventListener('wheel', activateSoundAndPlay);
+    const cleanup = () => {
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+      window.removeEventListener('touchend', unlockAudio);
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
     };
+
+    window.addEventListener('click', unlockAudio, { passive: true, once: true });
+    window.addEventListener('touchstart', unlockAudio, { passive: true, once: true });
+    window.addEventListener('touchend', unlockAudio, { passive: true, once: true });
+    window.addEventListener('pointerdown', unlockAudio, { passive: true, once: true });
+    window.addEventListener('keydown', unlockAudio, { passive: true, once: true });
+
+    return cleanup;
   }, [getActiveVideo]);
 
   // Navigation: Go to NEXT reel
   const goToNext = useCallback(() => {
     if (currentPool.length === 0) return;
+    isManuallyPausedRef.current = false;
     setSlideDirection(1);
     setDragOffsetY(0);
     setIsDragging(false);
@@ -494,6 +500,7 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
 
   // Navigation: Go to PREVIOUS reel
   const goToPrev = useCallback(() => {
+    isManuallyPausedRef.current = false;
     if (filterMode === 'saved') {
       if (historyIndex > 0) {
         setSlideDirection(-1);
@@ -528,6 +535,7 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
   // Shuffle / Reset Session to a fresh random reel
   const shuffleReel = useCallback(() => {
     if (currentPool.length <= 1) return;
+    isManuallyPausedRef.current = false;
     setSlideDirection(1);
     if (filterMode === 'saved') {
       const otherIndices = feedHistory.map((_, i) => i).filter(i => i !== historyIndex);
@@ -543,32 +551,24 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
       }
       return;
     }
-    const currentId = currentReel?.id || '';
-    const newStart = pickRandomReel(currentPool, [currentId]) || currentPool[0];
-    if (newStart) {
-      const newQueue: AnimeReel[] = [newStart];
-      const excluded = [newStart.id, currentId];
-      for (let i = 0; i < 3; i++) {
-        const next = pickRandomReel(currentPool, excluded);
-        if (next) {
-          newQueue.push(next);
-          excluded.push(next.id);
-        }
-      }
+    // Reshuffle the deck across all drives and draw 4 fresh, non-repeating reels
+    reelDeckManager.ensureDeck(currentPool, true);
+    const newQueue = reelDeckManager.drawNextReels(currentPool, 4, [currentReel?.id || '']);
+    if (newQueue.length > 0) {
       setFeedHistory(newQueue);
       setHistoryIndex(0);
       setDragOffsetY(0);
       setIsPlaying(true);
       preloadReels(newQueue.map(r => r.id));
-      reelMediaCache.preloadReel(newStart.id, 'high');
+      reelMediaCache.preloadReel(newQueue[0].id, 'high');
       saveStoredReelsSession({
         feedHistory: newQueue,
         historyIndex: 0,
-        lastWatchedReelId: newStart.id,
+        lastWatchedReelId: newQueue[0].id,
         filterMode: 'all',
       });
     }
-  }, [currentPool, currentReel?.id, filterMode, feedHistory, historyIndex, pickRandomReel]);
+  }, [currentPool, currentReel?.id, filterMode, feedHistory, historyIndex]);
 
   // Handle external refresh trigger (e.g. user tapped Reels tab while already on Reels)
   const prevRefreshTriggerRef = useRef(refreshTrigger);
@@ -590,7 +590,8 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
     video.muted = false;
     video.volume = 1.0;
 
-    if (video.paused) {
+    if (video.paused || isManuallyPausedRef.current) {
+      isManuallyPausedRef.current = false;
       const p = video.play();
       if (p !== undefined) {
         p.then(() => {
@@ -598,8 +599,13 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
           setShowPlayPauseFeedback('play');
           setTimeout(() => setShowPlayPauseFeedback(null), 650);
         }).catch(() => {});
+      } else {
+        setIsPlaying(true);
+        setShowPlayPauseFeedback('play');
+        setTimeout(() => setShowPlayPauseFeedback(null), 650);
       }
     } else {
+      isManuallyPausedRef.current = true;
       video.pause();
       setIsPlaying(false);
       setShowPlayPauseFeedback('pause');
@@ -1144,7 +1150,7 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
                     e.currentTarget.muted = false;
                     e.currentTarget.volume = 1.0;
                     setIsBuffering(false);
-                    if (isPlaying) {
+                    if (isPlaying && !isManuallyPausedRef.current) {
                       e.currentTarget.play().catch(() => {});
                     }
                   }}
@@ -1153,7 +1159,7 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
                     e.currentTarget.volume = 1.0;
                     setIsBuffering(false);
                     setIsFrameRendered(true);
-                    if (isPlaying) {
+                    if (isPlaying && !isManuallyPausedRef.current) {
                       e.currentTarget.play().catch(() => {});
                     }
                   }}
@@ -1171,7 +1177,7 @@ export const ReelsView: React.FC<ReelsViewProps> = ({
                     target.muted = false;
                     target.volume = 1.0;
                     setIsBuffering(false);
-                    if (isPlaying) {
+                    if (isPlaying && !isManuallyPausedRef.current) {
                       target.play().catch(() => {});
                     }
                   }}

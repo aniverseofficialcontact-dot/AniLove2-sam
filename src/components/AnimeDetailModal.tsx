@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft, X, Play, Star, Plus, Minus, Check, Bookmark, Tv, Film,
   Calendar, Clock, Building2, Sparkles, Share2, ExternalLink,
-  ChevronRight, Users, MessageSquare, AlertCircle, RefreshCw, Layers,
+  ChevronLeft, ChevronRight, Users, MessageSquare, AlertCircle, RefreshCw, Layers,
   MoreVertical, Music, Headphones, Info, Eye, EyeOff, Search,
   LayoutGrid, List, Download, ChevronDown, ChevronUp, FastForward,
   CheckCircle2, Volume2, Sparkle, Compass
@@ -14,6 +14,7 @@ import { fetchAnimeDetails, sanitizeDescription } from '../services/anilist';
 import { ProVideoPlayer } from './ProVideoPlayer';
 import { AnimeWatchOrderTab } from './AnimeWatchOrderTab';
 import { computeTotalEpisodes, generateEpisodeRanges } from '../services/episodeHelper';
+import { useHorizontalScroll } from '../hooks/useHorizontalScroll';
 import {
   checkIsFillerEpisode,
   getArcOrFormattedTitle,
@@ -105,6 +106,9 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
   const [showFullSynopsis, setShowFullSynopsis] = useState<boolean>(false);
   const [audioMode, setAudioMode] = useState<'SUB' | 'DUB'>('SUB');
 
+  const recommendationsScroll = useHorizontalScroll({ step: 320 });
+  const modalTabsScroll = useHorizontalScroll({ step: 200 });
+
   const playerRef = useRef<HTMLDivElement>(null);
 
   // Close kebab menu on outside click
@@ -144,6 +148,7 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
     }
 
     setEpisodeSearchQuery('');
+    setSelectedEpisodeRange('all');
     setShowFullSynopsis(false);
 
     fetchAnimeDetails(anime.id)
@@ -192,6 +197,16 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
     if (isOpen) window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
+
+  // Lock body scroll when modal is active to prevent scroll chaining
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen]);
 
   const currentAnime = details || anime;
   const title = currentAnime?.title?.english || currentAnime?.title?.romaji || currentAnime?.title?.userPreferred || 'Unknown Title';
@@ -523,28 +538,49 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
       ranges.push({ label: `${start}–${end}`, start, end });
     }
     return ranges;
-  }, [episodeList]);
+  }, [episodeList.length]);
+
+  // Auto-reset range filter if invalid for current anime (e.g. anime has <= 50 episodes or range exceeds total)
+  useEffect(() => {
+    if (selectedEpisodeRange !== 'all') {
+      const isValid = episodeRanges.some(r => r.label === selectedEpisodeRange);
+      if (!isValid) {
+        setSelectedEpisodeRange('all');
+      }
+    }
+  }, [selectedEpisodeRange, episodeRanges]);
 
   // Filtered episodes based on search query and active range
   const filteredEpisodes = useMemo(() => {
     let list = episodeList;
 
-    // Apply Range Filter if active and no search query
-    if (selectedEpisodeRange !== 'all' && !episodeSearchQuery.trim()) {
-      const parts = selectedEpisodeRange.split('–').map(Number);
-      if (parts.length === 2) {
+    // Apply Range Filter ONLY if current anime actually has range chunks (>50 episodes) and no active text search
+    if (selectedEpisodeRange !== 'all' && episodeRanges.length > 0 && !episodeSearchQuery.trim()) {
+      const parts = selectedEpisodeRange.split(/[–\-]/).map(Number);
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
         const [start, end] = parts;
-        list = list.filter(ep => ep.number >= start && ep.number <= end);
+        const ranged = list.filter(ep => ep.number >= start && ep.number <= end);
+        if (ranged.length > 0) {
+          list = ranged;
+        }
       }
     }
 
     if (!episodeSearchQuery.trim()) return list;
 
     const q = episodeSearchQuery.toLowerCase().trim();
-    return episodeList.filter(
-      ep => ep.number.toString() === q || ep.title.toLowerCase().includes(q)
-    );
-  }, [episodeList, episodeSearchQuery, selectedEpisodeRange]);
+    const cleanNum = q.replace(/^(?:episode|ep|#)\s*/i, '').trim();
+
+    return episodeList.filter(ep => {
+      const epNumStr = ep.number.toString();
+      if (epNumStr === q || epNumStr === cleanNum) return true;
+      if (`episode ${ep.number}`.toLowerCase().includes(q)) return true;
+      if (`ep ${ep.number}`.toLowerCase().includes(q)) return true;
+      if (ep.title && ep.title.toLowerCase().includes(q)) return true;
+      if (ep.synopsis && ep.synopsis.toLowerCase().includes(q)) return true;
+      return false;
+    });
+  }, [episodeList, episodeSearchQuery, selectedEpisodeRange, episodeRanges]);
 
 
 
@@ -558,10 +594,10 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 15 }}
         transition={{ duration: 0.25, ease: 'easeOut' }}
-        className="fixed inset-0 z-[90] bg-[#090b14] overflow-y-auto min-h-screen text-slate-100 flex flex-col"
+        className="fixed inset-0 z-[90] bg-[#090b14] overflow-y-auto overflow-x-hidden text-slate-100 overscroll-contain"
       >
         {/* Sticky Page Navigation Header */}
-        <header className="sticky top-0 z-50 flex items-center justify-between px-4 sm:px-8 py-3 bg-slate-900/80 backdrop-blur-2xl border-b border-white/10 shadow-lg">
+        <header className="sticky top-0 z-50 flex items-center justify-between px-3 sm:px-8 py-3 bg-slate-900/80 backdrop-blur-2xl border-b border-white/10 shadow-lg w-full max-w-full min-w-0">
           <div className="flex items-center gap-3 min-w-0">
             <button
               id="detail-back-to-catalog-btn"
@@ -650,9 +686,9 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
         </div>
 
         {/* Main Content Area */}
-        <div className="relative max-w-7xl w-full mx-auto px-4 sm:px-8 pb-16 -mt-28 sm:-mt-36 z-10 flex-1">
+        <div className="relative max-w-7xl w-full mx-auto px-3 sm:px-8 pb-20 -mt-28 sm:-mt-36 z-10 min-w-0">
           {/* Header Card Profile */}
-          <div className="flex flex-col md:flex-row items-center md:items-end gap-6 text-center md:text-left">
+          <div className="flex flex-col md:flex-row items-center md:items-end gap-6 text-center md:text-left w-full min-w-0">
             {/* Large Poster Image */}
             <div className="relative w-40 sm:w-52 lg:w-60 aspect-[3/4] rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl border-2 border-slate-700/80 bg-slate-900 shrink-0 ring-4 ring-black/40">
               {coverUrl ? (
@@ -922,7 +958,12 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
           </div>
 
           {/* Navigation Tabs */}
-          <div id="modal-tab-nav" className="flex items-center gap-2 sm:gap-6 mt-8 border-b border-slate-800/90 overflow-x-auto pb-0 scrollbar-none">
+          <div
+            id="modal-tab-nav"
+            ref={modalTabsScroll.containerRef}
+            {...modalTabsScroll.scrollHandlers}
+            className="flex items-center gap-2 sm:gap-6 mt-8 border-b border-slate-800/90 overflow-x-auto pb-0 scrollbar-none w-full max-w-full min-w-0 select-none cursor-grab active:cursor-grabbing"
+          >
             {[
               { id: 'overview', label: 'Overview' },
               { id: 'episodes', label: 'Episodes' },
@@ -941,7 +982,7 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                       // Keep in browser mode initially or open last watched if requested
                     }
                   }}
-                  className={`px-3 sm:px-4 py-3 text-xs sm:text-sm font-bold transition relative whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                  className={`px-3 sm:px-4 py-3 text-xs sm:text-sm font-bold transition relative whitespace-nowrap cursor-pointer flex items-center gap-1.5 shrink-0 ${
                     active
                       ? 'text-white'
                       : 'text-slate-400 hover:text-slate-200'
@@ -960,7 +1001,7 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
           </div>
 
           {/* Tab Contents */}
-          <div className="py-8">
+          <div className="py-6 sm:py-8 w-full min-w-0">
             {/* TAB 1: OVERVIEW */}
             {activeTab === 'overview' && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1090,11 +1131,35 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                         <Sparkles className="w-4 h-4 text-orange-400" />
                         <span>More Like This</span>
                       </h3>
-                      {details?.recommendations?.nodes && details.recommendations.nodes.length > 0 && (
-                        <span className="text-[11px] font-semibold text-slate-400">
-                          Swipe ↔
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {details?.recommendations?.nodes && details.recommendations.nodes.length > 0 && (
+                          <span className="text-[11px] font-semibold text-slate-400 hidden sm:inline">
+                            Swipe ↔
+                          </span>
+                        )}
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => recommendationsScroll.scrollLeft()}
+                            disabled={!recommendationsScroll.canScrollLeft}
+                            className="p-1 rounded-md bg-slate-800 border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 disabled:opacity-25 disabled:pointer-events-none transition cursor-pointer"
+                            title="Scroll left"
+                            aria-label="Scroll recommendations left"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => recommendationsScroll.scrollRight()}
+                            disabled={!recommendationsScroll.canScrollRight}
+                            className="p-1 rounded-md bg-slate-800 border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 disabled:opacity-25 disabled:pointer-events-none transition cursor-pointer"
+                            title="Scroll right"
+                            aria-label="Scroll recommendations right"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
 
                     {loading ? (
@@ -1108,9 +1173,11 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                       </div>
                     ) : details?.recommendations?.nodes && details.recommendations.nodes.filter(r => r.mediaRecommendation).length > 0 ? (
                       <div
+                        ref={recommendationsScroll.containerRef}
+                        {...recommendationsScroll.scrollHandlers}
                         tabIndex={0}
                         aria-label="More Like This recommendations carousel"
-                        className="flex items-start gap-3.5 overflow-x-auto pb-3 pt-1 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent focus:outline-none select-none"
+                        className="flex items-start gap-3.5 overflow-x-auto pb-3 pt-1 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent focus:outline-none select-none cursor-grab active:cursor-grabbing"
                       >
                         {details.recommendations.nodes
                           .filter(rec => rec.mediaRecommendation)
@@ -1516,7 +1583,25 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                     </div>
 
                     {/* Episode Items Rendering (List & Grid Layouts) */}
-                    {episodeViewMode === 'grid' ? (
+                    {filteredEpisodes.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12 px-4 text-center rounded-2xl bg-[#101424]/70 border border-slate-800/80">
+                        <Film className="w-10 h-10 text-slate-500 mb-3 opacity-60" />
+                        <p className="text-sm font-semibold text-slate-200">No episodes found</p>
+                        <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                          {episodeSearchQuery ? `No episodes match "${episodeSearchQuery}".` : 'No episodes match the selected filter.'}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEpisodeSearchQuery('');
+                            setSelectedEpisodeRange('all');
+                          }}
+                          className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow-md cursor-pointer"
+                        >
+                          Show All Episodes ({episodeList.length})
+                        </button>
+                      </div>
+                    ) : episodeViewMode === 'grid' ? (
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5">
                         {filteredEpisodes.map(ep => {
                           const isWatched = ep.number <= currentProgress;
@@ -1717,6 +1802,8 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                   if (targetAnime.id !== currentAnime.id) {
                     onNavigateToAnime(targetAnime);
                   }
+                  setSelectedEpisodeRange('all');
+                  setEpisodeSearchQuery('');
                   setActiveTab('episodes');
                   if (targetEp) {
                     setPlayingEpisode(targetEp);

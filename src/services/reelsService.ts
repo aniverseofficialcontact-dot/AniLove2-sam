@@ -1,6 +1,7 @@
 import { AnimeReel } from '../types';
 import { reelMediaCache } from './reelMediaCache';
 import bundledReelsRaw from '../data/animeReels.json';
+import { generateStratifiedDeck, reelDeckManager, recordReelAsWatched } from './reelRandomizer';
 
 const SAVED_REELS_STORAGE_KEY = 'anilove_saved_anime_reels';
 const WATCHED_REELS_HISTORY_KEY = 'anilove_watched_reels_history';
@@ -255,7 +256,7 @@ export function sanitizeReelForStorage(reel: Partial<AnimeReel>): AnimeReel {
 export function getBundledReels(shuffle: boolean = true): AnimeReel[] {
   let list = Array.isArray(bundledReelsRaw) ? bundledReelsRaw.map(sanitizeReelForStorage) : [];
   if (shuffle && list.length > 0) {
-    list = [...list].sort(() => Math.random() - 0.5);
+    list = generateStratifiedDeck(list);
   }
   return list;
 }
@@ -344,10 +345,8 @@ export async function fetchAllReels(shuffle: boolean = true): Promise<AnimeReel[
       const staticData = await staticRes.json();
       let items = Array.isArray(staticData?.reels) ? staticData.reels : (Array.isArray(staticData) ? staticData : []);
       if (items.length > 0) {
-        if (shuffle) {
-          items = [...items].sort(() => Math.random() - 0.5);
-        }
-        return items.map(sanitizeReelForStorage);
+        const sanitized = items.map(sanitizeReelForStorage);
+        return shuffle ? generateStratifiedDeck(sanitized) : sanitized;
       }
     }
   } catch {

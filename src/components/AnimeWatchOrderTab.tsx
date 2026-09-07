@@ -43,6 +43,7 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
   const [filterType, setFilterType] = useState<'all' | 'series' | 'essential' | 'movies' | 'ovas'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [expandedEpisodeItems, setExpandedEpisodeItems] = useState<Record<number, boolean>>({});
+  const [expandedCardIds, setExpandedCardIds] = useState<Record<number, boolean>>({});
   const [completedSteps, setCompletedSteps] = useState<Record<string, boolean>>(() => {
     try {
       const saved = localStorage.getItem(`anilove_watch_order_progress_${currentAnime.id}`);
@@ -51,6 +52,36 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
       return {};
     }
   });
+
+  const isCardExpanded = (itemId?: number, isCurrentAnime?: boolean): boolean => {
+    const key = itemId || 0;
+    if (expandedCardIds[key] !== undefined) {
+      return expandedCardIds[key];
+    }
+    // By default, expand the current anime card; keep others clean & compact
+    return Boolean(isCurrentAnime);
+  };
+
+  const toggleCardExpanded = (itemId: number, isCurrentAnime: boolean, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedCardIds(prev => {
+      const currentlyExpanded = prev[itemId] !== undefined ? prev[itemId] : isCurrentAnime;
+      return {
+        ...prev,
+        [itemId]: !currentlyExpanded,
+      };
+    });
+  };
+
+  const toggleAllCards = (expand: boolean) => {
+    const newMap: Record<number, boolean> = {};
+    const list = getActiveList();
+    list.forEach((item, index) => {
+      const key = item.id || (index + 1);
+      newMap[key] = expand;
+    });
+    setExpandedCardIds(newMap);
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -161,6 +192,11 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
   const totalInList = currentList.length;
   const completedCount = currentList.filter(item => completedSteps[item.title] || (item.id && completedSteps[String(item.id)])).length;
   const percentComplete = totalInList > 0 ? Math.round((completedCount / totalInList) * 100) : 0;
+  const allExpanded =
+    currentList.length > 0 &&
+    currentList.every((item, index) =>
+      isCardExpanded(item.id || (index + 1), item.id === currentAnime.id)
+    );
 
   const currentTitle =
     currentAnime.title?.english ||
@@ -169,26 +205,28 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
     'Anime';
 
   return (
-    <div className="space-y-6 text-left animate-in fade-in duration-200">
+    <div className="space-y-5 sm:space-y-6 text-left animate-in fade-in duration-200 w-full min-w-0">
       {/* Header Banner */}
-      <div className="relative rounded-2xl bg-gradient-to-br from-[#12172b] via-[#101424] to-[#0c0f1d] border border-indigo-500/20 p-5 sm:p-6 overflow-hidden shadow-xl">
+      <div className="relative rounded-2xl bg-gradient-to-br from-[#12172b] via-[#101424] to-[#0c0f1d] border border-indigo-500/20 p-4 sm:p-6 overflow-hidden shadow-xl w-full min-w-0">
         <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
 
-        <div className="relative z-10 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+        <div className="relative z-10 space-y-3 sm:space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0">
+            <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+              <div className="p-2 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 shrink-0 mt-0.5 sm:mt-0">
                 <Compass className="w-5 h-5" />
               </div>
-              <div>
-                <h3 className="text-lg sm:text-xl font-black text-white tracking-tight flex items-center gap-2">
-                  <span>Franchise Complete Watch Order</span>
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 border border-indigo-500/30 text-indigo-300">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-base sm:text-xl font-black text-white tracking-tight">
+                    Franchise Watch Order
+                  </h3>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 whitespace-nowrap">
                     <Calendar className="w-3 h-3 text-indigo-400" />
-                    Chronological Release Timeline
+                    Chronological Timeline
                   </span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
+                </div>
+                <p className="text-xs text-slate-400 mt-1 line-clamp-2 sm:line-clamp-none">
                   Official sequential release order with instant episode stream launchers for all seasons and movies
                 </p>
               </div>
@@ -196,22 +234,24 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
 
             {/* Quick stats badge */}
             {orderData && (
-              <div className="flex items-center gap-2 text-xs bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800 text-slate-300">
-                <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="font-semibold text-white">{orderData.totalEntries}</span> Releases
+              <div className="flex flex-wrap items-center gap-2 text-xs bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800 text-slate-300 shrink-0 self-start sm:self-auto">
+                <div className="flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="font-semibold text-white">{orderData.totalEntries}</span> Releases
+                </div>
                 {orderData.totalEstimatedEpisodes && (
-                  <>
+                  <div className="flex items-center gap-1.5">
                     <span className="text-slate-600">•</span>
                     <Tv className="w-3.5 h-3.5 text-indigo-400" />
-                    <span className="font-semibold text-white">{orderData.totalEstimatedEpisodes}</span> Total Episodes
-                  </>
+                    <span className="font-semibold text-white">{orderData.totalEstimatedEpisodes}</span> Eps
+                  </div>
                 )}
                 {orderData.totalEstimatedHours && (
-                  <>
+                  <div className="flex items-center gap-1.5">
                     <span className="text-slate-600">•</span>
                     <Clock className="w-3.5 h-3.5 text-amber-400" />
                     <span>{orderData.totalEstimatedHours}</span>
-                  </>
+                  </div>
                 )}
               </div>
             )}
@@ -219,7 +259,7 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
 
           {/* Franchise Summary Description */}
           {orderData?.summary && (
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-4xl">
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-4xl break-words">
               {orderData.summary}
             </p>
           )}
@@ -245,13 +285,13 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
       </div>
 
       {/* Control Bar: Filter Chips & Search */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1 w-full min-w-0">
         {/* Filter chips */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none w-full sm:flex-1 min-w-0 max-w-full">
           <button
             type="button"
             onClick={() => setFilterType('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer shrink-0 ${
               filterType === 'all'
                 ? 'bg-indigo-600 text-white shadow-sm'
                 : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800'
@@ -262,7 +302,7 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
           <button
             type="button"
             onClick={() => setFilterType('series')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer shrink-0 ${
               filterType === 'series'
                 ? 'bg-indigo-600 text-white shadow-sm'
                 : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800'
@@ -273,7 +313,7 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
           <button
             type="button"
             onClick={() => setFilterType('essential')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer shrink-0 ${
               filterType === 'essential'
                 ? 'bg-indigo-600 text-white shadow-sm'
                 : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800'
@@ -284,7 +324,7 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
           <button
             type="button"
             onClick={() => setFilterType('movies')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer shrink-0 ${
               filterType === 'movies'
                 ? 'bg-indigo-600 text-white shadow-sm'
                 : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800'
@@ -295,7 +335,7 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
           <button
             type="button"
             onClick={() => setFilterType('ovas')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer shrink-0 ${
               filterType === 'ovas'
                 ? 'bg-indigo-600 text-white shadow-sm'
                 : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800'
@@ -305,16 +345,37 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
           </button>
         </div>
 
-        {/* Quick Search */}
-        <div className="relative min-w-[200px] sm:w-64">
-          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search seasons or arcs..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-          />
+        {/* Quick Search & Expand/Collapse All */}
+        <div className="flex items-center gap-2 w-full sm:w-auto min-w-0">
+          <div className="relative flex-1 sm:w-60 min-w-0">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search seasons or arcs..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => toggleAllCards(!allExpanded)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold transition shrink-0 cursor-pointer"
+            title={allExpanded ? 'Collapse all cards to compact view' : 'Expand all cards with full details'}
+          >
+            {allExpanded ? (
+              <>
+                <ChevronUp className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="hidden min-[420px]:inline">Collapse All</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="hidden min-[420px]:inline">Expand All</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 
@@ -376,12 +437,14 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
             }
             if (isMovie && parsedEpisodeCount <= 0) parsedEpisodeCount = 1;
 
-            const isExpanded = Boolean(item.id && expandedEpisodeItems[item.id]);
+            const cardId = item.id || (index + 1);
+            const cardExpanded = isCardExpanded(cardId, isCurrent);
+            const isEpisodesExpanded = Boolean(item.id && expandedEpisodeItems[item.id]);
 
             return (
               <div
                 key={item.id || index}
-                className={`relative group flex flex-col items-stretch p-4 sm:p-5 rounded-2xl transition-all duration-200 border ${
+                className={`relative group flex flex-col items-stretch p-3.5 sm:p-4 rounded-2xl transition-all duration-200 border w-full max-w-full min-w-0 overflow-hidden ${
                   isCurrent
                     ? 'bg-[#151c38] border-indigo-500/70 shadow-lg shadow-indigo-500/10'
                     : isCompleted
@@ -389,10 +452,81 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
                     : 'bg-[#101424] hover:bg-[#14192e] border-slate-800 hover:border-slate-700'
                 }`}
               >
-                {/* Main Card Row */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                  {/* Left Step Badge & Checkmark */}
-                  <div className="flex sm:flex-col items-center justify-between sm:justify-start gap-2 shrink-0 sm:w-12">
+                {/* Mobile Top Header Bar: Step Badge + Badges + Mark Watched */}
+                <div className="flex sm:hidden items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-800/70 w-full min-w-0">
+                  <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                    <div
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-xs shrink-0 shadow-sm ${
+                        isCurrent
+                          ? 'bg-gradient-to-br from-indigo-500 to-indigo-700 text-white ring-1 ring-indigo-400'
+                          : isCompleted
+                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-700/60'
+                          : isEssential
+                          ? 'bg-indigo-950/80 text-indigo-300 border border-indigo-700/50'
+                          : isMovie
+                          ? 'bg-amber-950/80 text-amber-300 border border-amber-700/50'
+                          : 'bg-slate-800 text-slate-300 border border-slate-700'
+                      }`}
+                    >
+                      {index + 1 < 10 ? `0${index + 1}` : index + 1}
+                    </div>
+
+                    {isCurrent && (
+                      <span className="px-1.5 py-0.5 rounded-md bg-indigo-500 text-white text-[9px] font-black tracking-wider uppercase">
+                        Current
+                      </span>
+                    )}
+
+                    {item.releaseYear && (
+                      <span className="px-1.5 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-black">
+                        {item.releaseYear}
+                      </span>
+                    )}
+
+                    <span
+                      className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold tracking-wide uppercase ${
+                        isEssential
+                          ? 'bg-indigo-950/90 text-indigo-300 border border-indigo-700/50'
+                          : isMovie
+                          ? 'bg-amber-950/90 text-amber-300 border border-amber-700/50'
+                          : isOVA
+                          ? 'bg-purple-950/90 text-purple-300 border border-purple-700/50'
+                          : 'bg-slate-800 text-slate-300 border border-slate-700'
+                      }`}
+                    >
+                      {item.importanceLabel || (isEssential ? 'Main Story' : isMovie ? 'Movie' : 'Canon Entry')}
+                    </span>
+
+                    {item.episodesCount && (
+                      <span className="text-[10px] text-indigo-300 font-bold bg-indigo-950/40 border border-indigo-500/30 px-1.5 py-0.5 rounded-md">
+                        {item.episodesCount}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Mark Watched Button on Mobile */}
+                  <button
+                    type="button"
+                    onClick={e => toggleCompleted(stepKey, e)}
+                    className={`p-1 rounded-lg transition shrink-0 cursor-pointer ${
+                      isCompleted
+                        ? 'text-emerald-400 hover:text-emerald-300 bg-emerald-950/50'
+                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                    }`}
+                    title={isCompleted ? 'Mark as unwatched' : 'Mark as watched'}
+                  >
+                    {isCompleted ? (
+                      <CheckCircle2 className="w-5 h-5 fill-emerald-500/20 text-emerald-400" />
+                    ) : (
+                      <Circle className="w-5 h-5 text-slate-500" />
+                    )}
+                  </button>
+                </div>
+
+                {/* Main Card Content Row: Poster & Information side-by-side */}
+                <div className="flex items-start gap-3 sm:gap-4 w-full min-w-0">
+                  {/* Desktop-only Left Step Badge & Checkmark Column */}
+                  <div className="hidden sm:flex flex-col items-center justify-start gap-2 shrink-0 w-12">
                     <div
                       className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-sm transition-transform shadow-md ${
                         isCurrent
@@ -409,7 +543,6 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
                       {index + 1 < 10 ? `0${index + 1}` : index + 1}
                     </div>
 
-                    {/* Mark Watched Button */}
                     <button
                       type="button"
                       onClick={e => toggleCompleted(stepKey, e)}
@@ -432,7 +565,7 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
                   {item.coverImage && (
                     <div
                       onClick={() => item.animeObj && handlePlayEpisodeDirectly(item.animeObj, 1)}
-                      className="relative w-20 sm:w-24 aspect-[2/3] rounded-xl overflow-hidden bg-slate-900 shrink-0 border border-slate-800 shadow-md cursor-pointer hover:border-indigo-400 transition group/poster"
+                      className="relative w-16 min-[380px]:w-20 sm:w-24 aspect-[2/3] rounded-xl overflow-hidden bg-slate-900 shrink-0 border border-slate-800 shadow-md cursor-pointer hover:border-indigo-400 transition group/poster self-start"
                       title={`Play ${item.title}`}
                     >
                       <img
@@ -442,21 +575,21 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
                         referrerPolicy="no-referrer"
                         loading="lazy"
                       />
-                      <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/80 text-[9px] font-black text-white tracking-wider uppercase">
+                      <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/80 text-[8px] min-[380px]:text-[9px] font-black text-white tracking-wider uppercase">
                         {item.format || 'ANIME'}
                       </div>
                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/poster:opacity-100 transition-opacity flex items-center justify-center">
-                        <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-600/50">
-                          <Play className="w-3.5 h-3.5 fill-white ml-0.5" />
+                        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-600/50">
+                          <Play className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-white ml-0.5" />
                         </div>
                       </div>
                     </div>
                   )}
 
                   {/* Content Block */}
-                  <div className="flex-1 min-w-0 space-y-2.5">
-                    {/* Badges row */}
-                    <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex-1 min-w-0 space-y-2 sm:space-y-2.5">
+                    {/* Desktop badges row */}
+                    <div className="hidden sm:flex flex-wrap items-center gap-2">
                       {isCurrent && (
                         <span className="px-2.5 py-0.5 rounded-lg bg-indigo-500 text-white text-[10px] font-black tracking-wider uppercase shadow-sm">
                           Current Anime
@@ -494,140 +627,170 @@ export const AnimeWatchOrderTab: React.FC<AnimeWatchOrderTabProps> = ({
                       )}
                     </div>
 
-                    {/* Title & Romaji */}
-                    <div>
+                    {/* Title */}
+                    <div className="min-w-0">
                       <h4
                         onClick={() => item.animeObj && handlePlayEpisodeDirectly(item.animeObj, 1)}
-                        className={`font-bold text-sm sm:text-base text-slate-100 group-hover:text-indigo-300 transition leading-snug cursor-pointer flex items-center gap-2`}
+                        className="font-bold text-sm sm:text-base text-slate-100 group-hover:text-indigo-300 transition leading-snug cursor-pointer break-words"
                       >
-                        <span>{item.title}</span>
+                        {item.title}
                       </h4>
-                      {item.romajiTitle && item.romajiTitle !== item.title && (
-                        <p className="text-[11px] text-slate-400 mt-0.5 italic truncate">
-                          {item.romajiTitle}
-                        </p>
-                      )}
                     </div>
 
-                    {/* Order Guide Box */}
-                    {item.orderGuide && (
-                      <div className="flex items-start gap-2 p-2.5 rounded-xl bg-slate-900/90 border border-slate-800/80 text-xs text-slate-300">
-                        <Compass className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
-                        <div>
-                          <strong className="text-indigo-300 font-semibold">Where to watch: </strong>
-                          <span>{item.orderGuide}</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Note Description */}
-                    {item.note && (
-                      <p className="text-xs text-slate-400 leading-relaxed line-clamp-2">
-                        {item.note}
-                      </p>
-                    )}
-
-                    {/* Action Buttons Row */}
-                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                    {/* Primary Actions Row (Always Visible) */}
+                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pt-0.5 w-full min-w-0">
                       {/* Primary Play Button */}
                       {item.animeObj && (
                         <button
                           type="button"
                           onClick={() => handlePlayEpisodeDirectly(item.animeObj!, 1)}
-                          className="flowable-watch-btn inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-white text-xs font-bold transition hover:scale-105 active:scale-95 cursor-pointer"
+                          className="flowable-watch-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white text-xs font-bold transition hover:scale-105 active:scale-95 cursor-pointer shadow-sm shrink-0"
                         >
                           <Play className="w-3.5 h-3.5 fill-white" />
-                          <span>{isMovie ? 'Watch Movie' : 'Watch Episode 1'}</span>
+                          <span>{isMovie ? 'Watch Movie' : 'Watch Ep 1'}</span>
                         </button>
                       )}
 
-                      {/* Expandable Episodes Accordion Button */}
-                      {item.id && parsedEpisodeCount > 1 && (
-                        <button
-                          type="button"
-                          onClick={e => toggleExpandEpisodes(item.id!, e)}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                            isExpanded
-                              ? 'bg-indigo-950/80 border-indigo-500/50 text-indigo-300 shadow-sm'
-                              : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300 hover:text-white'
-                          }`}
-                        >
-                          <List className="w-3.5 h-3.5 text-indigo-400" />
-                          <span>Episodes ({parsedEpisodeCount})</span>
-                          {isExpanded ? (
-                            <ChevronUp className="w-3.5 h-3.5 text-indigo-400" />
-                          ) : (
-                            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                          )}
-                        </button>
-                      )}
-
-                      {/* Browse All Episodes in Full Modal Tab */}
-                      {item.animeObj && (
-                        <button
-                          type="button"
-                          onClick={() => handleBrowseEpisodes(item.animeObj!)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white text-xs font-medium transition cursor-pointer"
-                          title="Open full Episodes browser with descriptions and audio selector"
-                        >
-                          <Video className="w-3.5 h-3.5 text-slate-400" />
-                          <span>Browse Episodes Tab</span>
-                        </button>
-                      )}
-
-                      {/* Mark Completed Step */}
+                      {/* View More / View Less Toggle Button */}
                       <button
                         type="button"
-                        onClick={e => toggleCompleted(stepKey, e)}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition border cursor-pointer ${
-                          isCompleted
-                            ? 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300 hover:bg-emerald-950'
-                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                        onClick={e => toggleCardExpanded(cardId, isCurrent, e)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer shrink-0 ${
+                          cardExpanded
+                            ? 'bg-indigo-950/80 border-indigo-500/50 text-indigo-300 shadow-sm'
+                            : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300 hover:text-indigo-300'
                         }`}
+                        title={cardExpanded ? 'Collapse card details' : 'View more details and guide'}
                       >
-                        {isCompleted ? (
-                          <>
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>Completed</span>
-                          </>
+                        <span>{cardExpanded ? 'View Less' : 'View More'}</span>
+                        {cardExpanded ? (
+                          <ChevronUp className="w-3.5 h-3.5 text-indigo-400" />
                         ) : (
-                          <>
-                            <Circle className="w-3.5 h-3.5 text-slate-500" />
-                            <span>Mark Completed</span>
-                          </>
+                          <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                         )}
                       </button>
                     </div>
+
+                    {/* Expandable Details Section (Shown when cardExpanded is true) */}
+                    {cardExpanded && (
+                      <div className="space-y-2.5 pt-1.5 animate-in fade-in slide-in-from-top-1 duration-150 w-full min-w-0">
+                        {/* Romaji Title */}
+                        {item.romajiTitle && item.romajiTitle !== item.title && (
+                          <p className="text-[11px] text-slate-400 italic truncate">
+                            {item.romajiTitle}
+                          </p>
+                        )}
+
+                        {/* Order Guide Box */}
+                        {item.orderGuide && (
+                          <div className="flex items-start gap-1.5 sm:gap-2 p-2 sm:p-2.5 rounded-xl bg-slate-900/90 border border-slate-800/80 text-[11px] sm:text-xs text-slate-300 min-w-0 break-words">
+                            <Compass className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
+                            <div className="min-w-0 flex-1">
+                              <strong className="text-indigo-300 font-semibold">Where to watch: </strong>
+                              <span className="break-words">{item.orderGuide}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Note Description */}
+                        {item.note && (
+                          <p className="text-xs text-slate-400 leading-relaxed line-clamp-3 break-words">
+                            {item.note}
+                          </p>
+                        )}
+
+                        {/* Secondary Actions Row */}
+                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pt-0.5 w-full min-w-0">
+                          {/* Expandable Episodes Accordion Button */}
+                          {item.id && parsedEpisodeCount > 1 && (
+                            <button
+                              type="button"
+                              onClick={e => toggleExpandEpisodes(item.id!, e)}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer shrink-0 ${
+                                isEpisodesExpanded
+                                  ? 'bg-indigo-950/80 border-indigo-500/50 text-indigo-300 shadow-sm'
+                                  : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300 hover:text-white'
+                              }`}
+                            >
+                              <List className="w-3.5 h-3.5 text-indigo-400" />
+                              <span>Episodes ({parsedEpisodeCount})</span>
+                              {isEpisodesExpanded ? (
+                                <ChevronUp className="w-3.5 h-3.5 text-indigo-400" />
+                              ) : (
+                                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                              )}
+                            </button>
+                          )}
+
+                          {/* Browse All Episodes in Full Modal Tab */}
+                          {item.animeObj && (
+                            <button
+                              type="button"
+                              onClick={() => handleBrowseEpisodes(item.animeObj!)}
+                              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white text-xs font-medium transition cursor-pointer shrink-0"
+                              title="Open full Episodes browser"
+                            >
+                              <Video className="w-3.5 h-3.5 text-slate-400" />
+                              <span className="hidden min-[380px]:inline">Browse Episodes</span>
+                              <span className="min-[380px]:hidden">Episodes Tab</span>
+                            </button>
+                          )}
+
+                          {/* Desktop-only Mark Completed Step Button */}
+                          <button
+                            type="button"
+                            onClick={e => toggleCompleted(stepKey, e)}
+                            className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition border cursor-pointer shrink-0 ${
+                              isCompleted
+                                ? 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300 hover:bg-emerald-950'
+                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                            }`}
+                          >
+                            {isCompleted ? (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>Completed</span>
+                              </>
+                            ) : (
+                              <>
+                                <Circle className="w-3.5 h-3.5 text-slate-500" />
+                                <span>Mark Completed</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Inline Expandable Episode Quick-Launcher Drawer */}
-                {isExpanded && item.animeObj && (
-                  <div className="mt-4 pt-4 border-t border-slate-800/80 space-y-3 animate-in fade-in duration-150">
+                {/* Inline Expandable Episode Quick-Launcher Drawer (when episodes accordion is toggled inside expanded card) */}
+                {cardExpanded && isEpisodesExpanded && item.animeObj && (
+                  <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-slate-800/80 space-y-2.5 sm:space-y-3 animate-in fade-in duration-150 w-full min-w-0">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Play className="w-3.5 h-3.5 text-indigo-400 fill-indigo-400" />
                         <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                          Select Episode to Open & Watch
+                          Select Episode to Watch
                         </span>
                         <span className="text-[11px] font-bold text-indigo-400 bg-indigo-950/60 border border-indigo-500/30 px-2 py-0.5 rounded-full">
-                          {parsedEpisodeCount} episodes
+                          {parsedEpisodeCount} eps
                         </span>
                       </div>
                     </div>
 
                     {/* Grid of Episode Buttons */}
-                    <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2 max-h-48 overflow-y-auto pr-1 scrollbar-thin">
+                    <div className="grid grid-cols-3 min-[360px]:grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-1.5 sm:gap-2 max-h-48 overflow-y-auto pr-1 scrollbar-thin">
                       {Array.from({ length: parsedEpisodeCount }, (_, i) => i + 1).map(epNum => (
                         <button
                           key={epNum}
                           type="button"
                           onClick={() => handlePlayEpisodeDirectly(item.animeObj!, epNum)}
-                          className="group/ep flex items-center justify-center gap-1 px-2.5 py-2 rounded-xl bg-slate-900/90 hover:bg-indigo-600 border border-slate-800 hover:border-indigo-500 text-slate-200 hover:text-white text-xs font-bold transition shadow-sm hover:scale-105 active:scale-95 cursor-pointer"
+                          className="group/ep flex items-center justify-center gap-1 px-2 py-1.5 rounded-xl bg-slate-900/90 hover:bg-indigo-600 border border-slate-800 hover:border-indigo-500 text-slate-200 hover:text-white text-xs font-bold transition shadow-sm hover:scale-105 active:scale-95 cursor-pointer"
                           title={`Play Episode ${epNum} of ${item.title}`}
                         >
-                          <Play className="w-2.5 h-2.5 fill-indigo-400 group-hover/ep:fill-white text-indigo-400 group-hover/ep:text-white" />
-                          <span>EP {epNum}</span>
+                          <Play className="w-2.5 h-2.5 opacity-60 group-hover/ep:opacity-100 fill-current" />
+                          <span>{epNum}</span>
                         </button>
                       ))}
                     </div>
