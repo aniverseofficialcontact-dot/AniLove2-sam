@@ -7,7 +7,7 @@ import {
   Database, Snowflake, Palette, Layers
 } from 'lucide-react';
 import { UserSettings, UserMediaListItem } from '../types';
-import { getAniListAuthUrl, fetchUserMediaList, fetchAuthenticatedViewer } from '../services/anilist';
+import { getAniListAuthUrl, fetchUserMediaList, fetchAuthenticatedViewer, extractAniListToken, ANILIST_CLIENT_ID } from '../services/anilist';
 import { fetchMALUserAnimelist, fetchMALUserProfile, getMALAuthUrl } from '../services/myanimelist';
 
 interface SettingsModalProps {
@@ -202,7 +202,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // HANDLER: Option 2 - Verify & Save Manual Token
   const handleSaveManualToken = async () => {
-    const token = manualToken.trim();
+    const token = extractAniListToken(manualToken);
     if (!token) {
       onShowToast('error', 'Please enter an OAuth Access Token.', 'Token Missing');
       return;
@@ -841,7 +841,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* Footer */}
           <div className="px-6 py-3.5 border-t border-slate-800 bg-[#090c19] flex items-center justify-between text-xs text-slate-500">
-            <span>Powered by AniList GraphQL API (Client ID: 49024)</span>
+            <span>Powered by AniList GraphQL API (Client ID: {ANILIST_CLIENT_ID})</span>
             <button
               onClick={onClose}
               className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold transition"

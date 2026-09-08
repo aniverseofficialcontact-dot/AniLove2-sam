@@ -7,7 +7,7 @@ import {
   Trash2, Send
 } from 'lucide-react';
 import { UserSettings, UserMediaListItem, MediaListStatus, StreamServerId, MALUser } from '../types';
-import { getAniListAuthUrl, fetchUserMediaList, fetchAuthenticatedViewer } from '../services/anilist';
+import { getAniListAuthUrl, fetchUserMediaList, fetchAuthenticatedViewer, extractAniListToken, ANILIST_CLIENT_ID } from '../services/anilist';
 import { fetchMALUserAnimelist, fetchMALUserProfile, getMALAuthUrl } from '../services/myanimelist';
 import { STREAM_PROVIDERS, SUPPORTED_LANGUAGES } from '../services/streamingProviders';
 
@@ -198,7 +198,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // HANDLER: Save Manual OAuth Token
   const handleSaveManualToken = async () => {
-    const token = manualToken.trim();
+    const token = extractAniListToken(manualToken);
     if (!token) {
       onShowToast('error', 'Please enter an OAuth Access Token.', 'Token Missing');
       return;

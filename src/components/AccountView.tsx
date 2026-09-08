@@ -53,7 +53,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { UserSettings, UserMediaListItem, UserProfile, GachaCard, StreamServerId, AnimeReel } from '../types';
 import { auth, signInWithGoogle, logoutUser, syncUserProfileToCloud } from '../lib/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { fetchUserMediaList, fetchAniListUserProfile, fetchViewerProfile, getAniListAuthUrl } from '../services/anilist';
+import { fetchUserMediaList, fetchAniListUserProfile, fetchViewerProfile, getAniListAuthUrl, extractAniListToken } from '../services/anilist';
 import { getStoredGachaVault, getCardAwakeningLevel } from '../services/storage';
 import { getSafeCharacterImage, getFallbackAvatarSvg } from '../services/characterPool';
 import { STREAM_PROVIDERS } from '../services/streamingProviders';
@@ -492,7 +492,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
 
   // Connect AniList Access Token for 2-Way Live Sync
   const handleConnectAniListToken = async (tokenToUse?: string) => {
-    const token = (tokenToUse || anilistTokenInput).trim();
+    const token = extractAniListToken(tokenToUse || anilistTokenInput);
     if (!token) {
       onShowToast('error', 'Please paste a valid AniList OAuth Access Token.', 'Token Required');
       return;

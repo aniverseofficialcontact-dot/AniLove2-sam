@@ -1,11 +1,22 @@
 import { Anime, AnimeDetail, AiringScheduleItem, AniListUser, MediaListStatus, UserMediaListItem } from '../types';
 
 export const ANILIST_API_URL = 'https://graphql.anilist.co';
-export const ANILIST_CLIENT_ID = '49024';
+export const ANILIST_CLIENT_ID = '50555';
+
+export function extractAniListToken(raw: string): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  if (trimmed.includes('access_token=')) {
+    const match = trimmed.match(/access_token=([^&]+)/);
+    if (match && match[1]) {
+      return decodeURIComponent(match[1]);
+    }
+  }
+  return trimmed;
+}
 
 export function getAniListAuthUrl(): string {
   // Implicit grant flow using configured AniList Client ID
-  const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname);
   return `https://anilist.co/api/v2/oauth/authorize?client_id=${ANILIST_CLIENT_ID}&response_type=token`;
 }
 
