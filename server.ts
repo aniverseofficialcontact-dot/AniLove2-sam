@@ -182,17 +182,42 @@ async function startServer() {
     return Array.from(seen.values());
   }
 
-  // Sync all 20 Drive subfolders and persist to disk
+  // Sync root Drive folder (1L7FrLGfkUSNJNDGseo6g9K0itnS3xxdE) and any subfolders, then persist to disk
   async function performFullDriveSync(): Promise<any[]> {
-    console.log('[Reels Auto-Sync] Starting background sync across all 20 Drive folders...');
+    console.log(`[Reels Auto-Sync] Starting background sync from master folder (${GOOGLE_DRIVE_ROOT_FOLDER})...`);
     const seen = new Map<string, any>();
     inMemoryReels.forEach(r => { if (r && r.id && /^[A-Za-z0-9_\-]{20,50}$/.test(r.id)) seen.set(r.id, r); });
 
-    for (const [folderId, folderName] of Object.entries(GOOGLE_DRIVE_SUBFOLDERS_MAP)) {
+    const foldersToScan = new Map<string, string>([
+      [GOOGLE_DRIVE_ROOT_FOLDER, 'Main Reels Folder'],
+      ...Object.entries(GOOGLE_DRIVE_SUBFOLDERS_MAP),
+    ]);
+
+    // Also dynamically discover any subfolders inside GOOGLE_DRIVE_ROOT_FOLDER
+    try {
+      const rootRes = await fetch(`https://drive.google.com/embeddedfolderview?id=${GOOGLE_DRIVE_ROOT_FOLDER}#list`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+        signal: AbortSignal.timeout(14000),
+      });
+      const rootHtml = await rootRes.text();
+      const folderLinks = [...rootHtml.matchAll(/https:\/\/drive\.google\.com\/drive\/folders\/([A-Za-z0-9_\-]{20,50})/g)];
+      for (const match of folderLinks) {
+        const subId = match[1];
+        if (subId && !foldersToScan.has(subId)) {
+          foldersToScan.set(subId, `Subfolder ${subId.slice(0, 6)}`);
+        }
+      }
+    } catch {
+      // Ignore dynamic subfolder discovery errors and continue scanning
+    }
+
+    for (const [folderId, folderName] of foldersToScan.entries()) {
       try {
         const folderReels = await scrapeDriveFolder(folderId, folderName);
         folderReels.forEach(r => {
-          if (r && r.id && /^[A-Za-z0-9_\-]{20,50}$/.test(r.id)) {
+          if (r && r.id && /^[A-Za-z0-9_\-]{20,50}$/.test(r.id) && ! foldersToScan.has(r.id)) {
             seen.set(r.id, r);
           }
         });
